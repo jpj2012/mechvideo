@@ -192,18 +192,20 @@
   };
 
   const WEAPON = {
-    SMALL:  { key: "small",  color: "#ff3b3b", glow: "rgba(255,59,59,0.9)",  dmg: 1, range: 220, cd: 0.45, kind: "beam" },
-    MEDIUM: { key: "medium", color: "#39ff6a", glow: "rgba(57,255,106,0.9)", dmg: 2, range: 300, cd: 0.9,  kind: "beam" },
-    LARGE:  { key: "large",  color: "#3b8cff", glow: "rgba(59,140,255,0.9)", dmg: 4, range: 380, cd: 1.5,  kind: "beam" },
-    LRM:    { key: "lrm",    color: "#ffb347", glow: "rgba(255,179,71,0.9)", dmg: 4, range: 440, cd: 2.6,  kind: "swarm" }
+    SMALL:     { key: "small",     color: "#ff3b3b", glow: "rgba(255,59,59,0.9)",   dmg: 1, range: 220, cd: 0.45, kind: "beam" },
+    MEDIUM:    { key: "medium",    color: "#39ff6a", glow: "rgba(57,255,106,0.9)",  dmg: 2, range: 300, cd: 0.9,  kind: "beam" },
+    LARGE:     { key: "large",     color: "#3b8cff", glow: "rgba(59,140,255,0.9)",  dmg: 4, range: 380, cd: 1.5,  kind: "beam" },
+    LRM:       { key: "lrm",       color: "#ffb347", glow: "rgba(255,179,71,0.9)",  dmg: 2, range: 440, cd: 2.6,  kind: "swarm" },
+    BALLISTIC: { key: "ballistic", color: "#fff2a8", glow: "rgba(255,235,160,0.9)", dmg: 3, range: 340, cd: 0.85, kind: "projectile", speed: 1500 }
   };
-  const WEAPON_LIST = [WEAPON.SMALL, WEAPON.MEDIUM, WEAPON.LARGE, WEAPON.LRM];
+  const WEAPON_LIST = [WEAPON.SMALL, WEAPON.MEDIUM, WEAPON.LARGE, WEAPON.LRM, WEAPON.BALLISTIC];
 
   // ---------- Entities (all in world coordinates) ----------
   let allies = [];
   let enemies = [];
   let beams = [];
   let swarms = [];
+  let slugs = [];
   let particles = [];
   let shocks = [];
   const camera = { x: 0, y: 0 };
@@ -300,10 +302,16 @@
   }
 
   function fireSwarm(from, to, w) {
-    const n = randInt(5, 8);
+    const n = randInt(26, 34);
     const dots = [];
-    for (let i = 0; i < n; i++) dots.push({ delay: rand(0, 0.12), ox: rand(-14, 14), oy: rand(-14, 14), arc: rand(30, 60) });
-    swarms.push({ x1: from.x, y1: from.y, x2: to.x, y2: to.y, target: to, dmg: w.def.dmg, dots, dur: rand(0.75, 0.95), t: 0, resolved: false });
+    for (let i = 0; i < n; i++) dots.push({ delay: rand(0, 0.28), ox: rand(-20, 20), oy: rand(-20, 20), arc: rand(24, 66) });
+    swarms.push({ x1: from.x, y1: from.y, x2: to.x, y2: to.y, target: to, dmg: w.def.dmg, dots, dur: rand(0.85, 1.05), t: 0, resolved: false });
+  }
+
+  function fireBallistic(from, to, w) {
+    const d = Math.hypot(to.x - from.x, to.y - from.y);
+    const dur = clamp(d / w.def.speed, 0.05, 0.4);
+    slugs.push({ x1: from.x, y1: from.y, x2: to.x, y2: to.y, target: to, dmg: w.def.dmg, color: w.def.color, glow: w.def.glow, dur, t: 0, resolved: false });
   }
 
   function spawnExplosion(x, y, size) {
@@ -413,6 +421,7 @@
           const t = nearestTarget(a, enemies, w.def.range);
           if (t) {
             if (w.def.kind === "beam") { fireBeam(a, t, w); t.hp -= w.def.dmg; }
+            else if (w.def.kind === "projectile") fireBallistic(a, t, w);
             else fireSwarm(a, t, w);
             w.cd = w.def.cd * rand(0.85, 1.2);
           } else w.cd = 0.15;
@@ -462,6 +471,19 @@
       }
     }
     swarms = swarms.filter(s => s.t < s.dur + 0.15);
+
+    for (const s of slugs) {
+      s.t += dt;
+      if (s.t >= s.dur && !s.resolved) {
+        s.resolved = true;
+        if (s.target && s.target.alive) {
+          s.target.hp -= s.dmg;
+          sparkAt(s.target.x, s.target.y);
+          if (s.target.hp <= 0) killEnemy(s.target, true);
+        }
+      }
+    }
+    slugs = slugs.filter(s => s.t < s.dur + 0.08);
 
     for (const p of particles) {
       p.life -= dt; p.x += (p.vx || 0) * dt; p.y += (p.vy || 0) * dt;
@@ -660,6 +682,22 @@
     }
   }
 
+  function drawSlug(s) {
+    const t = clamp(s.t / s.dur, 0, 1);
+    const hx = lerp(s.x1, s.x2, t), hy = lerp(s.y1, s.y2, t);
+    const tailT = clamp(t - 0.09, 0, 1);
+    const tx = lerp(s.x1, s.x2, tailT), ty = lerp(s.y1, s.y2, tailT);
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = s.glow; ctx.lineWidth = 3.4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(hx, hy, 1.6, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+
   function drawParticle(p) {
     ctx.save();
     ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
@@ -696,6 +734,7 @@
     for (const d of drawables) drawClassBadge(d.m, d.ally);
 
     for (const s of swarms) drawSwarm(s);
+    for (const s of slugs) drawSlug(s);
     for (const b of beams) drawBeam(b);
     for (const s of shocks) drawShock(s);
     for (const p of particles) drawParticle(p);
